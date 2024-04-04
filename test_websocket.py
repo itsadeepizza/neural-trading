@@ -11,6 +11,7 @@ API_KEY = os.getenv('API_KEY')
 # wss://ws.coincap.io/prices?assets=bitcoin,ethereum,monero,litecoin
 
 uri = f"wss://ws.coincap.io/prices?assets=dogecoin,bitcoin,ethereum,monero,litecoin&api_key={API_KEY}"
+uri = f"wss://ws.coincap.io/prices?assets=dogecoin,bitcoin,ethereum,monero,litecoin"
 # uri = f"wss://ws.coincap.io/prices?assets=ALL&api_key={API_KEY}"
 async def get_prices(q):
     async with connect(uri) as websocket:
@@ -31,7 +32,7 @@ async def store_prices(q, csv_name):
         while True:
             batch_size += 1
             data, timestamp = await q.get()
-            print(f"{timestamp} - {data}")
+            # print(f"{timestamp} - {data}")
             for coin, price in data.items():
                 f.write(f"{timestamp};{coin};{price}\n")
                 pass
