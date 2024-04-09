@@ -50,9 +50,14 @@ async def main(csv_name):
     await task_producer
     await q.join()
 
+while True:
+    try:
+        csv_name = f"dataset/prices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        with open(csv_name, 'a') as f:
+            f.write("timestamp;coin;price\n")
+        asyncio.run(main(csv_name))
+    except Exception as e:
+        print(e)
+        continue
 
-csv_name = f"dataset/prices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-with open(csv_name, 'a') as f:
-    f.write("timestamp;coin;price\n")
-asyncio.run(main(csv_name))
 
