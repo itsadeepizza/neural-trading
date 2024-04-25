@@ -2,3 +2,4 @@ python-dotenv
 websockets
 matplotlib
 pandas
+tqdm
