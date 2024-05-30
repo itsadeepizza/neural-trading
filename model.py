@@ -58,5 +58,23 @@ class LSTM_CELL(torch.nn.Module):
 
         return (new_hypotesis, new_cell_state)
 
+
+class LSTM_Trader(torch.nn.Module):
+    """
+    see https://colah.github.io/posts/2015-08-Understanding-LSTMs/ for reference
+    """
+    def __init__(self, state_size, input_size, output_size):
+        super(self).__init__()        
+        self.lstm = LSTM_CELL(state_size, input_size)
+        self.fc = torch.nn.Linear(state_size, output_size)
+
+    def forward(self, cell_state_prev, hypotesys, x):
+        hypotesis, cell_state = self.lstm(cell_state_prev, hypotesys, x)
+        output = self.fc(hypotesis)
+        output = torch.sigmoid(output)
+
+        return (output, hypotesis, cell_state)
+
+
 if __name__ == "__main__":
     lstm = LSTM_CELL(10, 5).to(device)
