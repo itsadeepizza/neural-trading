@@ -1,42 +1,18 @@
 import pandas as pd
 from model import LSTM_CELL
-from merge_dataset import load_dataset
+from dataloader import df_bit
 import torch
 from tqdm import tqdm
 import random
 
 
 
-# Load the dataset
-df_bit = load_dataset()
-
-# Convert price to float
-df_bit['price'] = df_bit['price'].astype(float)
-
-
-
-df_bit['next_price'] = df_bit['price'].shift(-1)
-df_bit['delta_price'] = df_bit['next_price'] - df_bit['price']
-
-# print mean and std
-print(df_bit['price'].mean())
-print(df_bit['price'].std())
-# Normalize the price
-df_bit['price'] = (df_bit['price'] - 65481) / 25580
-
-# Normalize the delta price
-print(df_bit['delta_price'].mean())
-print(df_bit['delta_price'].std())
-df_bit['delta_price'] = (df_bit['delta_price'] - 0) / 3.8
-
-df_bit = df_bit[:-1]
-print(df_bit.head())
 
 # Create the model
 state_size = 20
 lstm = LSTM_CELL(state_size=state_size, input_size=20)
+lstm.to(torch.device("cuda"))
 optimizer = torch.optim.Adam(lstm.parameters(), lr=0.01)
-
 # Split the dataset into training and testing
 all_train = df_bit.iloc[:int(0.8*len(df_bit))]
 test = df_bit.iloc[int(0.8*len(df_bit)):]
