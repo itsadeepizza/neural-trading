@@ -93,7 +93,7 @@ class LSTM_Trader(torch.nn.Module):
     """
 
     def __init__(self, state_size, input_size, output_size):
-        super(self).__init__()
+        super().__init__()
         self.lstm = LSTM_CELL(state_size, input_size)
         self.fc = torch.nn.Linear(state_size, output_size)
 
