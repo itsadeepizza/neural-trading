@@ -2,7 +2,8 @@ from model import LSTM_Trader
 import torch
 from collections import deque
 import random
-from dataloader import df_bit
+from merge_dataset import load_dataset
+import math
 
 # ┬ ┬┬┌─┐┌─┐┬─┐┌─┐┌─┐┬─┐┌─┐┌┬┐┌─┐┌┬┐┌─┐┬─┐┌─┐
 # ├─┤│├─┘├┤ ├┬┘├─┘├─┤├┬┘├─┤│││├┤  │ ├┤ ├┬┘└─┐
@@ -67,6 +68,9 @@ class Trainer:
         self.optimizer_policy = torch.optim.Adam(self.policy_net.parameters(), lr=LR)
         self.optimizer_target = torch.optim.Adam(self.target_net.parameters(), lr=LR)
 
+        # Load the dataset
+        df_bit = load_dataset()
+
         self.train_dataset = df_bit.iloc[:int(0.8*len(df_bit))]
         self.test_dataset = df_bit.iloc[int(0.8*len(df_bit)):]
 
@@ -96,25 +100,25 @@ class Trainer:
             own_btc = 0 # 0 = No btc, 1 = Own btc
             for i in range(len(train_segment) - 1):
                 current_price = train_segment['price'].iloc[i]
-                delta_price = train_segment['delta_price'].iloc[i]
+                new_price = train_segment['price'].iloc[i + 1]
+
                 # Convert to tensor and send to GPU
                 # Make x a tensor of shape (1)
                 x = torch.ones(self.state_size - 1) * current_price
-                label = torch.tensor([delta_price]).float()
 
                 # concat x with own_btc
                 x = torch.cat((x, torch.tensor([own_btc]).float())
                                 , 0)
                 x = x.to(torch.device(self.device))
-                label = label.to(torch.device(self.device))
+
                 # Forward pass
                 with torch.no_grad():
 
                     out, _, _ = self.policy_net(h, c, x)
 
                 action = self.epsilon_greedy_choice(out) # 0 = buy, 1 = sell, 2 = hold
-                new_price = current_price + label
-                reward = self.calculate_reward_d(current_price, new_price, action, own_btc)
+
+                reward = self.calculate_reward_d(new_price, current_price, action, own_btc)
 
 
                 # Calculate Q(state, A*)
@@ -129,15 +133,11 @@ class Trainer:
                     own_btc = 1
                 elif action == 1:
                     own_btc = 0
-                # update the price
-                current_price = new_price
+
                 # update x -> x_new
                 x_new = torch.ones(self.state_size - 1, device=self.device) * new_price
                 x_new = torch.cat((x_new, torch.tensor([own_btc], device=self.device).float())
                                 , 0)
-
-
-
 
                 with torch.no_grad():
                     # Calculate max_i Q(new state, Ai)
@@ -158,11 +158,12 @@ class Trainer:
                 h = h.detach()
                 c = c.detach()
                 if i % 300 == 0:
-                    print(f'current price {x[0]} - predicted price {h} - label {label} - loss {loss.item()}')
+                    print(f'current price {x[0]} - policy output {out} - loss {loss.item()}')
             # Update the target network
             if epoch % 2 == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
+
 
 
 
@@ -257,20 +258,23 @@ class Trainer:
         if (last_action == 0):
             # buy, if you already own btc, then you get a penalty
             if own_btc:
-                return -dumb_penalty
-            return torch.log(new_price/last_price)
+                r = -dumb_penalty
+            else:
+                r = math.log(new_price/last_price)
         if (last_action == 1):
             # sell, if you do not own btc, then you get a penalty
             if not own_btc:
-                return -dumb_penalty
-            return -torch.log(new_price/last_price)
+                r = -dumb_penalty
+            else:
+                r = -math.log(new_price/last_price)
         if (last_action == 2):
             if own_btc:
             # hold
-                return torch.log(new_price/last_price)
+                r = math.log(new_price/last_price)
             else:
-                return -torch.log(new_price/last_price)
-
+                r = -math.log(new_price/last_price)
+        ## convert to tensor
+        return torch.tensor([r], device=self.device)*1e5
 
 
 
