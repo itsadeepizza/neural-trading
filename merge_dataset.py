@@ -23,6 +23,9 @@ def load_dataset():
     
     # keep only bitcoin
     df_bit = df[df['coin'] == 'bitcoin']
+
+    # Convert price to float
+    df_bit['price'] = df_bit['price'].astype(float)
     
     return df_bit
 

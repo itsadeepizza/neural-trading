@@ -100,7 +100,9 @@ class LSTM_Trader(torch.nn.Module):
     def forward(self, cell_state_prev, hypotesys, x):
         hypotesis, cell_state = self.lstm(cell_state_prev, hypotesys, x)
         output = self.fc(hypotesis)
-        output = torch.sigmoid(output)
+        # output = torch.sigmoid(output)
+        # do a softmax here
+        output = torch.nn.functional.softmax(output, dim=0)
 
         return (output, hypotesis, cell_state)
 

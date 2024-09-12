@@ -123,7 +123,7 @@ class Trainer:
 
                 # Calculate Q(state, A*)
                 out, h, c = self.policy_net(h, c, x)
-                state_action_value = out[action]
+                state_action_value = out[action].unsqueeze(0)
 
 
 
@@ -136,8 +136,7 @@ class Trainer:
 
                 # update x -> x_new
                 x_new = torch.ones(self.state_size - 1, device=self.device) * new_price
-                x_new = torch.cat((x_new, torch.tensor([own_btc], device=self.device).float())
-                                , 0)
+                x_new = torch.cat((x_new, torch.tensor([own_btc], device=self.device).float()), 0)
 
                 with torch.no_grad():
                     # Calculate max_i Q(new state, Ai)
@@ -268,13 +267,15 @@ class Trainer:
             else:
                 r = -math.log(new_price/last_price)
         if (last_action == 2):
+            # rabbit penalty for holding
+            r = -1e-5
             if own_btc:
             # hold
-                r = math.log(new_price/last_price)
+                r += math.log(new_price/last_price)
             else:
-                r = -math.log(new_price/last_price)
+                r += -math.log(new_price/last_price)
         ## convert to tensor
-        return torch.tensor([r], device=self.device)*1e5
+        return torch.tensor([r], device=self.device)
 
 
 
