@@ -26,38 +26,38 @@ class LSTM_CELL(torch.nn.Module):
 
 
         self.forget_network = torch.nn.Sequential(
-                        torch.nn.Linear(concatenated_size, 100),
+                        torch.nn.Linear(concatenated_size, 500),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(100, 50),
+                        torch.nn.Linear(500, 100),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(50, state_size),
+                        torch.nn.Linear(100, state_size),
                         torch.nn.Sigmoid()
         )
 
         self.input_network = torch.nn.Sequential(
-                        torch.nn.Linear(concatenated_size, 100),
+                        torch.nn.Linear(concatenated_size, 500),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(100, 50),
+                        torch.nn.Linear(500, 100),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(50, state_size),
+                        torch.nn.Linear(100, state_size),
                         torch.nn.Sigmoid()
         )
 
         self.cell_network = torch.nn.Sequential(
-                        torch.nn.Linear(concatenated_size, 100),
+                        torch.nn.Linear(concatenated_size, 500),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(100, 50),
+                        torch.nn.Linear(500, 100),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(50, state_size),
+                        torch.nn.Linear(100, state_size),
                         torch.nn.Tanh()
         )
 
         self.output_network = torch.nn.Sequential(
-                        torch.nn.Linear(concatenated_size, 100),
+                        torch.nn.Linear(concatenated_size, 500),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(100, 50),
+                        torch.nn.Linear(500, 100),
                         torch.nn.ReLU(),
-                        torch.nn.Linear(50, state_size),
+                        torch.nn.Linear(100, state_size),
                         torch.nn.Sigmoid()
         )
 
@@ -102,7 +102,8 @@ class LSTM_Trader(torch.nn.Module):
         output = self.fc(hypotesis)
         # output = torch.sigmoid(output)
         # do a softmax here
-        output = torch.nn.functional.softmax(output, dim=0)
+        #output = torch.nn.functional.softmax(output, dim=0)
+        #output = torch.nn.ReLU()(output)
 
         return (output, hypotesis, cell_state)
 
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     # lil test loop
 
     N_SAMPLES = 10
-    random_input = torch.randn((10, 2))
+    random_input = torch.randn((10, input_size))
 
     state = torch.randn(state_size)
     hypotesis = torch.randn(state_size)

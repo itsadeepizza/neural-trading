@@ -54,14 +54,15 @@ class Trainer:
         Logging is generated here (TODO)
         """
         self.state_size = 20
+        self.input_size = 2
         output_size = 3 # buy, sell, hold
         #memory_size = 100
 
         #memory = ReplayMemory(memory_size)
 
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        self.policy_net = LSTM_Trader(self.state_size, self.state_size, output_size).to(self.device)
-        self.target_net = LSTM_Trader(self.state_size, self.state_size, output_size).to(self.device)
+        self.policy_net = LSTM_Trader(self.state_size, self.input_size, output_size).to(self.device)
+        self.target_net = LSTM_Trader(self.state_size, self.input_size, output_size).to(self.device)
 
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -80,52 +81,53 @@ class Trainer:
         Train the model
         """
         n_epochs = 100
-        train_size = 1_000
+        train_size = 10_000
+
+        print()
+
         # Train the model
         for epoch in range(n_epochs):
+
             # Extract a random segment of the training dataset
             random_idx = random.randint(0, len(self.train_dataset) - train_size)
             train_segment = self.train_dataset.iloc[random_idx:random_idx + train_size]
+
             print(f'Epoch {epoch}')
-            # Generate a neutral hidden state and cell state
-            h = torch.ones(self.state_size)
-            c = torch.ones(self.state_size)
-            h_target = torch.ones(self.state_size)
-            c_target = torch.ones(self.state_size)
-            h = h.to(torch.device(self.device))
-            c = c.to(torch.device(self.device))
-            h_target = h_target.to(torch.device(self.device))
-            c_target = c_target.to(torch.device(self.device))
+
+            # Generate starting h and C
+            h = torch.ones(self.state_size).to(torch.device(self.device))
+            c = torch.ones(self.state_size).to(torch.device(self.device))
+            h_target = torch.ones(self.state_size).to(torch.device(self.device))
+            c_target = torch.ones(self.state_size).to(torch.device(self.device))
+
             total_loss = 0
             own_btc = 0 # 0 = No btc, 1 = Own btc
+            buy_price = None
+
             for i in range(len(train_segment) - 1):
+
                 current_price = train_segment['price'].iloc[i]
                 new_price = train_segment['price'].iloc[i + 1]
 
-                # Convert to tensor and send to GPU
-                # Make x a tensor of shape (1)
-                x = torch.ones(self.state_size - 1) * current_price
-
-                # concat x with own_btc
-                x = torch.cat((x, torch.tensor([own_btc]).float())
-                                , 0)
-                x = x.to(torch.device(self.device))
+                x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
                 # Forward pass
                 with torch.no_grad():
-
                     out, _, _ = self.policy_net(h, c, x)
 
                 action = self.epsilon_greedy_choice(out) # 0 = buy, 1 = sell, 2 = hold
 
-                reward = self.calculate_reward_d(new_price, current_price, action, own_btc)
+                if action == 0 and own_btc == 0:
+                    buy_price = current_price
+                if action == 1 and own_btc == 1:
+                    buy_price = None
+                
+                #reward = self.calculate_reward_d(new_price, current_price, action, own_btc)
+                reward = self.calculate_reward_e(current_price, buy_price, action, own_btc)
 
-
-                # Calculate Q(state, A*)
+                # Calculate max_a Q(state, a)
                 out, h, c = self.policy_net(h, c, x)
                 state_action_value = out[action].unsqueeze(0)
-
-
 
                 # UPDATE THE STATE
                 # update own_btc
@@ -135,7 +137,7 @@ class Trainer:
                     own_btc = 0
 
                 # update x -> x_new
-                x_new = torch.ones(self.state_size - 1, device=self.device) * new_price
+                x_new = torch.ones(self.input_size - 1, device=self.device) * new_price
                 x_new = torch.cat((x_new, torch.tensor([own_btc], device=self.device).float()), 0)
 
                 with torch.no_grad():
@@ -157,11 +159,12 @@ class Trainer:
                 h = h.detach()
                 c = c.detach()
                 if i % 300 == 0:
-                    print(f'current price {x[0]} - policy output {out} - loss {loss.item()}')
+                    print(f'current price {x[0]} \npolicy output {out} \nloss {loss.item()}')
             # Update the target network
             if epoch % 2 == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
+            print()
 
 
 
@@ -277,6 +280,31 @@ class Trainer:
         ## convert to tensor
         return torch.tensor([r], device=self.device)
 
+
+    def calculate_reward_e(self, new_price, buy_price, last_action, own_btc):
+        """
+        simplified version of reward
+        returns -1 for impossible moves and loss, 1 when profit, 0 for other
+        """
+        if buy_price == None:
+            return 0
+
+        if last_action == 0: # buy
+            if own_btc == 0:
+                reward = 0
+            else:
+                reward = -1
+
+        if last_action == 1: # sell
+            if own_btc == 1 and new_price > buy_price: 
+                reward = 1
+            else:
+                reward = -1
+
+        if last_action == 2: # hold
+            reward = 0
+
+        return torch.tensor([reward], device = self.device)
 
 
 
