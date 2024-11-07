@@ -11,7 +11,7 @@ import math
 #######################################################
 # H = 0.01
 LR = 1e-3
-epsilon = 0.1
+epsilon = 0.5
 gamma = 0.99
 
 #######################################################
@@ -109,27 +109,34 @@ class Trainer:
                 current_price = train_segment['price'].iloc[i]
                 new_price = train_segment['price'].iloc[i + 1]
 
+                # Normalize the price
+                current_price = (current_price - 65481) / 25580
+                new_price = (new_price - 65481) / 25580
+
                 x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
                 # Forward pass
                 with torch.no_grad():
-                    out, _, _ = self.policy_net(h, c, x)
+                    policy_out, _, _ = self.policy_net(h, c, x)
 
-                action = self.epsilon_greedy_choice(out) # 0 = buy, 1 = sell, 2 = hold
+                action = self.epsilon_greedy_choice(policy_out) # 0 = buy, 1 = sell, 2 = hold
 
                 if action == 0 and own_btc == 0:
                     buy_price = current_price
-                if action == 1 and own_btc == 1:
-                    buy_price = None
+                # if action == 1 and own_btc == 1:
+                #     buy_price = None
                 
                 #reward = self.calculate_reward_d(new_price, current_price, action, own_btc)
                 reward = self.calculate_reward_e(current_price, buy_price, action, own_btc)
 
                 # Calculate max_a Q(state, a)
-                out, h, c = self.policy_net(h, c, x)
-                state_action_value = out[action].unsqueeze(0)
+                policy_out, h, c = self.policy_net(h, c, x)
+                state_action_value = policy_out[action].unsqueeze(0)
 
                 # UPDATE THE STATE
+                # print the state of own_btc before updating
+                if i % 300 == 0:
+                    print(f'own_btc before {own_btc}')
                 # update own_btc
                 if action == 0:
                     own_btc = 1
@@ -142,8 +149,8 @@ class Trainer:
 
                 with torch.no_grad():
                     # Calculate max_i Q(new state, Ai)
-                    out, h_target, c_target = self.target_net(h_target, c_target, x_new)
-                    next_state_value = out.max(0)[0]
+                    target_out, h_target, c_target = self.target_net(h_target, c_target, x_new)
+                    next_state_value = target_out.max(0)[0]
                     expected_state_action_values = reward + gamma * next_state_value
                     # Change shape to (1)
                     expected_state_action_values = expected_state_action_values.view(1)
@@ -159,12 +166,15 @@ class Trainer:
                 h = h.detach()
                 c = c.detach()
                 if i % 300 == 0:
-                    print(f'current price {x[0]} \npolicy output {out} \nloss {loss.item()}')
-            # Update the target network
-            if epoch % 2 == 0:
-                self.target_net.load_state_dict(self.policy_net.state_dict())
+                    print(f'action chosen: {action}')
+                    print(f'current price {x[0]} \npolicy output {policy_out} \ntarget net {target_out}\nloss {loss.item()}')
+                    print('------------------------')
+                # Update the target network
+                if i % 5 == 0:
+                    self.target_net.load_state_dict(self.policy_net.state_dict())
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
             print()
+
 
 
 
@@ -190,7 +200,7 @@ class Trainer:
 
     def epsilon_greedy_choice(self, h_target):
         if torch.rand(1) < epsilon:
-            return torch.randint(0, 3, (1,))
+            return torch.randint(0, 3, (1,)).item()
         else:
             return h_target.argmax(0)
 
@@ -286,8 +296,10 @@ class Trainer:
         simplified version of reward
         returns -1 for impossible moves and loss, 1 when profit, 0 for other
         """
-        if buy_price == None:
-            return 0
+        # if buy_price == None:
+        #     return 0;
+
+
 
         if last_action == 0: # buy
             if own_btc == 0:
@@ -302,7 +314,9 @@ class Trainer:
                 reward = -1
 
         if last_action == 2: # hold
-            reward = 0
+            if (last_action == 2):
+                # rabbit penalty for holding
+                reward = 0
 
         return torch.tensor([reward], device = self.device)
 
