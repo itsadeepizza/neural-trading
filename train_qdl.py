@@ -10,7 +10,7 @@ import math
 # ┴ ┴┴┴  └─┘┴└─┴  ┴ ┴┴└─┴ ┴┴ ┴└─┘ ┴ └─┘┴└─└─┘
 #######################################################
 # H = 0.01
-LR = 1e-3
+LR = 1e-5
 epsilon = 0.5
 gamma = 0.99
 
@@ -55,7 +55,7 @@ class Trainer:
         """
         self.state_size = 20
         self.input_size = 2
-        output_size = 3 # buy, sell, hold
+        output_size = 2 # buy, sell
         #memory_size = 100
 
         #memory = ReplayMemory(memory_size)
@@ -84,6 +84,7 @@ class Trainer:
         train_size = 10_000
 
         print()
+        capital = 1
 
         # Train the model
         for epoch in range(n_epochs):
@@ -121,13 +122,13 @@ class Trainer:
 
                 action = self.epsilon_greedy_choice(policy_out) # 0 = buy, 1 = sell, 2 = hold
 
-                if action == 0 and own_btc == 0:
-                    buy_price = current_price
+                # if action == 0 and own_btc == 0:
+                #     buy_price = current_price
                 # if action == 1 and own_btc == 1:
                 #     buy_price = None
                 
                 #reward = self.calculate_reward_d(new_price, current_price, action, own_btc)
-                reward = self.calculate_reward_e(current_price, buy_price, action, own_btc)
+                reward = self.calculate_reward_e(new_price, current_price, action, own_btc)
 
                 # Calculate max_a Q(state, a)
                 policy_out, h, c = self.policy_net(h, c, x)
@@ -140,6 +141,7 @@ class Trainer:
                 # update own_btc
                 if action == 0:
                     own_btc = 1
+                    capital += (new_price - current_price) * capital
                 elif action == 1:
                     own_btc = 0
 
@@ -168,6 +170,7 @@ class Trainer:
                 if i % 300 == 0:
                     print(f'action chosen: {action}')
                     print(f'current price {x[0]} \npolicy output {policy_out} \ntarget net {target_out}\nloss {loss.item()}')
+                    print(f'capital {capital}')
                     print('------------------------')
                 # Update the target network
                 if i % 5 == 0:
@@ -200,7 +203,7 @@ class Trainer:
 
     def epsilon_greedy_choice(self, h_target):
         if torch.rand(1) < epsilon:
-            return torch.randint(0, 3, (1,)).item()
+            return torch.randint(0, 2, (1,)).item()
         else:
             return h_target.argmax(0)
 
@@ -291,32 +294,28 @@ class Trainer:
         return torch.tensor([r], device=self.device)
 
 
-    def calculate_reward_e(self, new_price, buy_price, last_action, own_btc):
+    def calculate_reward_e(self, new_price, last_price, last_action, own_btc):
         """
         simplified version of reward
         returns -1 for impossible moves and loss, 1 when profit, 0 for other
         """
-        # if buy_price == None:
-        #     return 0;
-
-
 
         if last_action == 0: # buy
-            if own_btc == 0:
-                reward = 0
-            else:
-                reward = -1
-
-        if last_action == 1: # sell
-            if own_btc == 1 and new_price > buy_price: 
+            if new_price > last_price:
+                # profit from buying
                 reward = 1
             else:
+                # loss from buying
                 reward = -1
 
-        if last_action == 2: # hold
-            if (last_action == 2):
-                # rabbit penalty for holding
-                reward = 0
+        if last_action == 1:
+            if new_price > last_price:
+                # profit from selling
+                reward = 1
+            else:
+                # loss from selling
+                reward = -1
+
 
         return torch.tensor([reward], device = self.device)
 
@@ -332,3 +331,6 @@ if __name__ == '__main__':
     trainer = Trainer()
     trainer.train()
 
+# TODO
+# plot with tensorboard
+# log score (num gains)
