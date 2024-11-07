@@ -80,11 +80,11 @@ class Trainer:
         """
         Train the model
         """
-        n_epochs = 100
+        n_epochs = 1000
         train_size = 10_000
 
         print()
-        capital = 1
+
 
         # Train the model
         for epoch in range(n_epochs):
@@ -104,15 +104,15 @@ class Trainer:
             total_loss = 0
             own_btc = 0 # 0 = No btc, 1 = Own btc
             buy_price = None
-
+            capital = 1
             for i in range(len(train_segment) - 1):
 
-                current_price = train_segment['price'].iloc[i]
-                new_price = train_segment['price'].iloc[i + 1]
+                raw_current_price = train_segment['price'].iloc[i]
+                raw_new_price = train_segment['price'].iloc[i + 1]
 
                 # Normalize the price
-                current_price = (current_price - 65481) / 25580
-                new_price = (new_price - 65481) / 25580
+                current_price = (raw_current_price - 65481) / 25580
+                new_price = (raw_new_price - 65481) / 25580
 
                 x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
@@ -141,7 +141,7 @@ class Trainer:
                 # update own_btc
                 if action == 0:
                     own_btc = 1
-                    capital += (new_price - current_price) * capital
+                    capital = (raw_new_price / raw_current_price) * capital
                 elif action == 1:
                     own_btc = 0
 
