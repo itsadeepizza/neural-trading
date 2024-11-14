@@ -4,6 +4,11 @@ from collections import deque
 import random
 from merge_dataset import load_dataset
 import math
+import wandb
+
+
+
+
 
 # ┬ ┬┬┌─┐┌─┐┬─┐┌─┐┌─┐┬─┐┌─┐┌┬┐┌─┐┌┬┐┌─┐┬─┐┌─┐
 # ├─┤│├─┘├┤ ├┬┘├─┘├─┤├┬┘├─┤│││├┤  │ ├┤ ├┬┘└─┐
@@ -11,10 +16,40 @@ import math
 #######################################################
 # H = 0.01
 LR = 1e-5
-epsilon = 0.5
+epsilon_start = 0.6
+epsilon_end = 0.01
+time_interval = 500 # epochs
 gamma = 0.99
 
+#----------------------------------------------------------
+
+# calculate epsilon decay
+epsilon_decay = (epsilon_end / epsilon_start) ** (1 / time_interval)
+# well done copilot !
+epsilon = epsilon_start
+
 #######################################################
+
+
+# ╦  ╔═╗╔═╗╔═╗╦╔╗╔╔═╗         ╦ ╦╔═╗╔╗╔╔╦╗╔╗
+# ║  ║ ║║ ╦║ ╦║║║║║ ╦  ───    ║║║╠═╣║║║ ║║╠╩╗
+# ╩═╝╚═╝╚═╝╚═╝╩╝╚╝╚═╝         ╚╩╝╩ ╩╝╚╝═╩╝╚═╝
+
+# Start a new wandb run to track this train
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="Neural_Trading",
+
+    # track hyperparameters and run metadata
+    config={
+    "learning_rate": LR,
+    "epsilon_start": epsilon_start,
+    "epsilon_end": epsilon_end,
+    "time_interval": time_interval,
+    "gamma": gamma,
+    }
+)
+
 
 class ReplayMemory:
 
@@ -80,12 +115,15 @@ class Trainer:
         """
         Train the model
         """
+        global epsilon
         n_epochs = 1000
         train_size = 10_000
 
         print()
 
-
+        capital = 1
+        capital_always_buy = 1
+        capital_crazy_monkey = 1
         # Train the model
         for epoch in range(n_epochs):
 
@@ -103,8 +141,7 @@ class Trainer:
 
             total_loss = 0
             own_btc = 0 # 0 = No btc, 1 = Own btc
-            buy_price = None
-            capital = 1
+
             for i in range(len(train_segment) - 1):
 
                 raw_current_price = train_segment['price'].iloc[i]
@@ -144,6 +181,13 @@ class Trainer:
                     capital = (raw_new_price / raw_current_price) * capital
                 elif action == 1:
                     own_btc = 0
+                else:
+                    raise RuntimeError('Impossible action')
+
+                # Update dummy capitals
+                capital_always_buy = (raw_new_price / raw_current_price) * capital_always_buy
+                if torch.rand(1) < 0.5:
+                    capital_crazy_monkey = (raw_new_price / raw_current_price) * capital_crazy_monkey
 
                 # update x -> x_new
                 x_new = torch.ones(self.input_size - 1, device=self.device) * new_price
@@ -172,10 +216,33 @@ class Trainer:
                     print(f'current price {x[0]} \npolicy output {policy_out} \ntarget net {target_out}\nloss {loss.item()}')
                     print(f'capital {capital}')
                     print('------------------------')
-                # Update the target network
+                    # the same as above, but using WandB
+                    wandb.log({
+                        "action": action,
+                        "current_price": x[0],
+                        "loss": loss.item(),
+                        "capital": capital,
+                        "own_btc": own_btc,
+                        "epoch": epoch,
+                        "capital_always_buy": capital_always_buy,
+                        "capital_crazy_monkey": capital_crazy_monkey,
+                        "state_action_value": state_action_value,
+                        "expected_state_action_values": expected_state_action_values,
+                        "epsilon": epsilon,
+                        })
+
+
+                    # log policy output as two plots on the same panel
+                    wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]})
+
                 if i % 5 == 0:
                     self.target_net.load_state_dict(self.policy_net.state_dict())
+            # One epoch finished, a new one will start...
+            epsilon = epsilon * epsilon_decay
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
+            if epoch % 10 == 0:
+                print(f'Saving model at epoch {epoch}')
+                torch.save(self.policy_net.state_dict(), f'./models/policy_net_{epoch}.pt')
             print()
 
 
@@ -203,7 +270,7 @@ class Trainer:
 
     def epsilon_greedy_choice(self, h_target):
         if torch.rand(1) < epsilon:
-            return torch.randint(0, 2, (1,)).item()
+            return torch.randint(0, 1, (1,)).item()
         else:
             return h_target.argmax(0)
 
