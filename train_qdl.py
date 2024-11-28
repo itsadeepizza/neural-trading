@@ -105,10 +105,96 @@ class Trainer:
         self.optimizer_target = torch.optim.Adam(self.target_net.parameters(), lr=LR)
 
         # Load the dataset
-        df_bit = load_dataset()
+        #df_bit, test_dataset = load_dataset()
 
-        self.train_dataset = df_bit.iloc[:int(0.8*len(df_bit))]
-        self.test_dataset = df_bit.iloc[int(0.8*len(df_bit)):]
+        #self.train_dataset = df_bit.iloc[:int(0.8*len(df_bit))]
+        #self.test_dataset = df_bit.iloc[int(0.8*len(df_bit)):]
+
+        self.train_dataset = load_dataset('dataset/train')
+        self.test_dataset = load_dataset('dataset/test')
+
+
+        # initialize chunks for test dataset
+        test_size = 1_000
+        num_chunks = 10
+        test_chunks = [random.randint(0, len(self.test_dataset) - test_size) for j in range(num_chunks)]
+        self.test_segments = [self.test_dataset.iloc[chunk:chunk + test_size] for chunk in test_chunks]
+
+        self.test_capital = 1
+        self.test_capital_always_buy = 1
+        self.test_capital_crazy_monkey = 1
+
+        self.test_capital_crazy_monkey_B = 1
+
+        self.test_capital_savant_monkey = 1
+
+
+    def test(self):
+
+        # Generate starting h and C
+        h = torch.ones(self.state_size).to(torch.device(self.device))
+        c = torch.ones(self.state_size).to(torch.device(self.device))
+
+        last_delta = 0
+        savant_monkey_prob = 0.5
+        
+        for test_segment in self.test_segments:
+            own_btc = 0
+            for i in range(len(test_segment) - 1):
+
+                raw_current_price = test_segment['price'].iloc[i]
+                raw_new_price = test_segment['price'].iloc[i + 1]
+
+                # Normalize the price
+                current_price = (raw_current_price - 65481) / 25580
+                new_price = (raw_new_price - 65481) / 25580
+
+                x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
+
+                # Forward pass
+                with torch.no_grad():
+                    # Calculate max_a Q(state, a)
+                    policy_out, h, c = self.policy_net(h, c, x)
+                    action = policy_out.argmax(0)
+
+
+                # UPDATE THE STATE AND CAPITAL
+
+                # Update dummy capitals
+                self.test_capital_always_buy = (raw_new_price / raw_current_price) * self.test_capital_always_buy
+                if torch.rand(1) < 0.5:
+                    self.test_capital_crazy_monkey = (raw_new_price / raw_current_price) * self.test_capital_crazy_monkey
+
+                if torch.rand(1) < 0.5:
+                    self.test_capital_crazy_monkey_B = (raw_new_price / raw_current_price) * self.test_capital_crazy_monkey_B
+                    
+                savant_monkey_prob += last_delta * 100 * 0.02
+                savant_monkey_prob = min(1, max(0, savant_monkey_prob))
+                if torch.rand(1) < savant_monkey_prob:
+                    self.test_capital_savant_monkey = (raw_new_price / raw_current_price) * self.test_capital_savant_monkey
+
+                wandb.log({"savant_monkey_prob": savant_monkey_prob, 
+                           "test_capital_savant_monkey": self.test_capital_savant_monkey,
+                            "test_capital_crazy_monkey_B": self.test_capital_crazy_monkey_B,
+                            "test_capital_crazy_monkey": self.test_capital_crazy_monkey,
+                            "test_capital_always_buy": self.test_capital_always_buy,
+                            "test_capital": self.test_capital,
+                            "test_current_price": x[0]
+                           })
+
+
+                # update own_btc
+                if action == 0: # buy
+                    own_btc = 1
+                    self.test_capital = (raw_new_price / raw_current_price) * self.test_capital
+                elif action == 1: # sell
+                    own_btc = 0
+                else:
+                    raise RuntimeError('Impossible action')
+                
+                last_delta = new_price - current_price
+
+
 
 
     def train(self):
@@ -236,11 +322,14 @@ class Trainer:
                     wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]})
 
                 if i % 5 == 0:
+
                     self.target_net.load_state_dict(self.policy_net.state_dict())
             # One epoch finished, a new one will start...
             epsilon = epsilon * epsilon_decay
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
+
             if epoch % 10 == 0:
+                self.test()
                 print(f'Saving model at epoch {epoch}')
                 torch.save(self.policy_net.state_dict(), f'./models/policy_net_{epoch}.pt')
             print()

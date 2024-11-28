@@ -6,7 +6,8 @@ import os
 
 path = 'dataset'
 
-def load_dataset():
+def load_dataset(folder_name=path):
+    path = folder_name
 
     #  Load all the csv files ending with .csv in the dataset folder
     
@@ -26,7 +27,7 @@ def load_dataset():
 
     # Convert price to float
     df_bit['price'] = df_bit['price'].astype(float)
-    
+
     return df_bit
 
 if __name__ == "__main__":
