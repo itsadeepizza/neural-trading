@@ -7,11 +7,10 @@ import math
 import os
 
 USE_WANDB = False
+USE_REPLAY_MEMORY = True
 
 if USE_WANDB:
     import wandb
-
-
 
 
 
@@ -97,9 +96,8 @@ class Trainer:
         self.state_size = 20
         self.input_size = 2
         output_size = 2 # buy, sell
-        #memory_size = 100
 
-        #memory = ReplayMemory(memory_size)
+        self.memory = ReplayMemory(1000)
 
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.policy_net = LSTM_Trader(self.state_size, self.input_size, output_size).to(self.device)
@@ -110,12 +108,7 @@ class Trainer:
         self.optimizer_policy = torch.optim.Adam(self.policy_net.parameters(), lr=LR)
         self.optimizer_target = torch.optim.Adam(self.target_net.parameters(), lr=LR)
 
-        # Load the dataset
-        #df_bit, test_dataset = load_dataset()
-
-        #self.train_dataset = df_bit.iloc[:int(0.8*len(df_bit))]
-        #self.test_dataset = df_bit.iloc[int(0.8*len(df_bit)):]
-
+        # Load the datasets
         self.train_dataset = load_dataset('dataset/train')
         self.test_dataset = load_dataset('dataset/test')
 
@@ -202,6 +195,105 @@ class Trainer:
                 last_delta = new_price - current_price
 
 
+
+    def train_with_rm(self):
+        """
+        train using episodes, an episode starts with a random segment of 
+        the dataset and goes on until the agent buy and sell (therefore
+        observing a reward) or the segment ends
+        """
+
+        global epsilon
+        n_episodes = 1000
+        train_size = 10_000
+
+        # fill memory with transitions while interacting with the environment
+
+        for episode in range(n_episodes):
+
+            terminated = False # after a buy and a sell
+            truncated = False # after the current segment ends
+
+            random_idx = random.randint(0, len(self.train_dataset) - train_size)
+            train_segment = self.train_dataset.iloc[random_idx:random_idx + train_size]
+
+            while (not terminated and not truncated):
+
+                # Generate starting h and C
+                h = torch.ones(self.state_size).to(torch.device(self.device))
+                c = torch.ones(self.state_size).to(torch.device(self.device))
+
+                own_btc = 0 # 0 = No btc, 1 = Own btc
+                new_own_btc = own_btc
+
+                for i in range(len(train_segment) - 1):
+
+                    raw_current_price = train_segment['price'].iloc[i]
+                    raw_new_price = train_segment['price'].iloc[i + 1]
+
+                    # Normalize the price
+                    current_price = (raw_current_price - 65481) / 25580
+                    new_price = (raw_new_price - 65481) / 25580
+
+                    x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
+
+                    # Get the action for current environment state
+                    with torch.no_grad():
+                        policy_out, new_h, new_c = self.policy_net(h, c, x)
+
+                    action = self.epsilon_greedy_choice(policy_out) # 0 = buy, 1 = sell
+
+                    if action == 0 and own_btc == 0:
+                        new_own_btc == 1
+                    if action == 1 and own_btc == 1:
+                        terminated = True
+
+                    new_x = torch.tensor([new_price, new_own_btc], dtype = torch.float32).to(torch.device(self.device))
+
+                    # Compute reward for chosen action
+                    reward = self.calculate_reward_e(new_price, current_price, action, own_btc)
+
+                    env_state = (h, c, x)
+                    new_env_state = (new_h, new_c, new_x)
+
+                    self.memory.append((env_state, action, new_env_state, reward, terminated))
+
+                    h = new_h
+                    c = new_c
+                    own_btc = new_own_btc
+
+                truncated = True
+
+            # sample transitions from the memory and use them to update the weights
+
+            memory_batch = self.memory.sample(10)
+
+            for (env_state, action, new_env_state, reward, terminated) in memory_batch:
+
+                # get the target return for the action used in transition
+                if terminated:
+                    target_return = reward 
+                else:
+                    with torch.no_grad():
+                        target_return = reward + gamma * self.target_net(new_env_state[1],new_env_state[2],new_env_state[0])[0].max()
+            
+                with torch.no_grad():
+                    tar_Q_values = self.target_net(env_state[0],env_state[1],env_state[2])[0]        
+
+                tar_Q_values[action] = target_return 
+                pol_Q_values = self.policy_net(env_state[0],env_state[1],env_state[2])[0] # gradient is computed here
+            
+                loss = torch.nn.MSELoss()(pol_Q_values, tar_Q_values)
+                print(loss.item())
+
+                # Backward pass
+                self.optimizer_policy.zero_grad()
+                loss.backward()
+                # Update the weights
+                self.optimizer_policy.step()
+            
+            
+                
 
 
     def train(self):
@@ -500,7 +592,10 @@ class Trainer:
 
 if __name__ == '__main__':
     trainer = Trainer()
-    trainer.train()
+    if USE_REPLAY_MEMORY:
+        trainer.train_with_rm()
+    else:
+        trainer.train()
 
 # TODO
 # plot with tensorboard
