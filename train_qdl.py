@@ -4,7 +4,12 @@ from collections import deque
 import random
 from merge_dataset import load_dataset
 import math
-import wandb
+import os
+
+USE_WANDB = False
+
+if USE_WANDB:
+    import wandb
 
 
 
@@ -35,20 +40,21 @@ epsilon = epsilon_start
 # ║  ║ ║║ ╦║ ╦║║║║║ ╦  ───    ║║║╠═╣║║║ ║║╠╩╗
 # ╩═╝╚═╝╚═╝╚═╝╩╝╚╝╚═╝         ╚╩╝╩ ╩╝╚╝═╩╝╚═╝
 
-# Start a new wandb run to track this train
-wandb.init(
-    # set the wandb project where this run will be logged
-    project="Neural_Trading",
-
-    # track hyperparameters and run metadata
-    config={
-    "learning_rate": LR,
-    "epsilon_start": epsilon_start,
-    "epsilon_end": epsilon_end,
-    "time_interval": time_interval,
-    "gamma": gamma,
-    }
-)
+if USE_WANDB:
+    # Start a new wandb run to track this train
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="Neural_Trading",
+    
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": LR,
+        "epsilon_start": epsilon_start,
+        "epsilon_end": epsilon_end,
+        "time_interval": time_interval,
+        "gamma": gamma,
+        }
+    )
 
 
 class ReplayMemory:
@@ -173,14 +179,15 @@ class Trainer:
                 if torch.rand(1) < savant_monkey_prob:
                     self.test_capital_savant_monkey = (raw_new_price / raw_current_price) * self.test_capital_savant_monkey
 
-                wandb.log({"savant_monkey_prob": savant_monkey_prob, 
-                           "test_capital_savant_monkey": self.test_capital_savant_monkey,
-                            "test_capital_crazy_monkey_B": self.test_capital_crazy_monkey_B,
-                            "test_capital_crazy_monkey": self.test_capital_crazy_monkey,
-                            "test_capital_always_buy": self.test_capital_always_buy,
-                            "test_capital": self.test_capital,
-                            "test_current_price": x[0]
-                           })
+                if USE_WANDB:
+                    wandb.log({"savant_monkey_prob": savant_monkey_prob, 
+                               "test_capital_savant_monkey": self.test_capital_savant_monkey,
+                                "test_capital_crazy_monkey_B": self.test_capital_crazy_monkey_B,
+                                "test_capital_crazy_monkey": self.test_capital_crazy_monkey,
+                                "test_capital_always_buy": self.test_capital_always_buy,
+                                "test_capital": self.test_capital,
+                                "test_current_price": x[0]
+                               })
 
 
                 # update own_btc
@@ -303,33 +310,41 @@ class Trainer:
                     print(f'capital {capital}')
                     print('------------------------')
                     # the same as above, but using WandB
-                    wandb.log({
-                        "action": action,
-                        "current_price": x[0],
-                        "loss": loss.item(),
-                        "capital": capital,
-                        "own_btc": own_btc,
-                        "epoch": epoch,
-                        "capital_always_buy": capital_always_buy,
-                        "capital_crazy_monkey": capital_crazy_monkey,
-                        "state_action_value": state_action_value,
-                        "expected_state_action_values": expected_state_action_values,
-                        "epsilon": epsilon,
-                        })
+                    if USE_WANDB:
+                        wandb.log({
+                            "action": action,
+                            "current_price": x[0],
+                            "loss": loss.item(),
+                            "capital": capital,
+                            "own_btc": own_btc,
+                            "epoch": epoch,
+                            "capital_always_buy": capital_always_buy,
+                            "capital_crazy_monkey": capital_crazy_monkey,
+                            "state_action_value": state_action_value,
+                            "expected_state_action_values": expected_state_action_values,
+                            "epsilon": epsilon,
+                            })
 
 
-                    # log policy output as two plots on the same panel
-                    wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]})
+                        # log policy output as two plots on the same panel
+                        wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]})
 
                 if i % 5 == 0:
-
                     self.target_net.load_state_dict(self.policy_net.state_dict())
+
             # One epoch finished, a new one will start...
             epsilon = epsilon * epsilon_decay
             print(f'Epoch {epoch} finished, Loss {total_loss / (len(train_segment) - 1)}')
 
             if epoch % 10 == 0:
                 self.test()
+                if not os.path.exists('./models'):
+                    try:
+                        os.mkdir('./models')
+                        print("models directory created")
+                    except Exception as e:
+                        print(f"can't make models directory: {e}")
+                        quit()
                 print(f'Saving model at epoch {epoch}')
                 torch.save(self.policy_net.state_dict(), f'./models/policy_net_{epoch}.pt')
             print()
