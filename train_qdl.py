@@ -6,17 +6,15 @@ from merge_dataset import load_dataset
 import math
 import os
 
-USE_WANDB = False
-USE_REPLAY_MEMORY = True
+USE_WANDB = True
+USE_REPLAY_MEMORY = False
 
 if USE_WANDB:
     import wandb
 
-
-
-# ┬ ┬┬┌─┐┌─┐┬─┐┌─┐┌─┐┬─┐┌─┐┌┬┐┌─┐┌┬┐┌─┐┬─┐┌─┐
-# ├─┤│├─┘├┤ ├┬┘├─┘├─┤├┬┘├─┤│││├┤  │ ├┤ ├┬┘└─┐
-# ┴ ┴┴┴  └─┘┴└─┴  ┴ ┴┴└─┴ ┴┴ ┴└─┘ ┴ └─┘┴└─└─┘
+# ╦ ╦╦ ╦╔═╗╔═╗╦═╗╔═╗╔═╗╦═╗╔═╗╔╦╗╔═╗╔╦╗╔═╗╦═╗╔═╗
+# ╠═╣╚╦╝╠═╝║╣ ╠╦╝╠═╝╠═╣╠╦╝╠═╣║║║║╣  ║ ║╣ ╠╦╝╚═╗
+# ╩ ╩ ╩ ╩  ╚═╝╩╚═╩  ╩ ╩╩╚═╩ ╩╩ ╩╚═╝ ╩ ╚═╝╩╚═╚═╝
 #######################################################
 # H = 0.01
 LR = 1e-5
@@ -226,16 +224,21 @@ class Trainer:
                 own_btc = 0 # 0 = No btc, 1 = Own btc
                 new_own_btc = own_btc
 
-                for i in range(len(train_segment) - 1):
+                for i in range(len(train_segment) - 2):
 
-                    raw_current_price = train_segment['price'].iloc[i]
-                    raw_new_price = train_segment['price'].iloc[i + 1]
+                    raw_old_price = train_segment['price'].iloc[i]
+                    raw_current_price = train_segment['price'].iloc[i + 1]
+                    raw_new_price = train_segment['price'].iloc[i + 2]
+                    raw_delta_price = raw_current_price - raw_old_price
+                    raw_new_delta_price = raw_new_price - raw_current_price
 
                     # Normalize the price
                     current_price = (raw_current_price - 65481) / 25580
                     new_price = (raw_new_price - 65481) / 25580
+                    delta_price = raw_delta_price / 1
+                    new_delta_price = raw_new_delta_price / 1
 
-                    x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
+                    x = torch.tensor([delta_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
                     # Get the action for current environment state
                     with torch.no_grad():
@@ -327,16 +330,21 @@ class Trainer:
             total_loss = 0
             own_btc = 0 # 0 = No btc, 1 = Own btc
 
-            for i in range(len(train_segment) - 1):
+            for i in range(len(train_segment) - 2):
 
-                raw_current_price = train_segment['price'].iloc[i]
-                raw_new_price = train_segment['price'].iloc[i + 1]
+                raw_old_price = train_segment['price'].iloc[i]
+                raw_current_price = train_segment['price'].iloc[i + 1]
+                raw_new_price = train_segment['price'].iloc[i + 2]
+                raw_delta_price = raw_current_price - raw_old_price
+                raw_new_delta_price = raw_new_price - raw_current_price
 
                 # Normalize the price
                 current_price = (raw_current_price - 65481) / 25580
                 new_price = (raw_new_price - 65481) / 25580
+                delta_price = raw_delta_price / 1
+                new_delta_price = raw_new_delta_price / 1
 
-                x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
+                x = torch.tensor([delta_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
                 # Forward pass
                 with torch.no_grad():
@@ -375,7 +383,8 @@ class Trainer:
                     capital_crazy_monkey = (raw_new_price / raw_current_price) * capital_crazy_monkey
 
                 # update x -> x_new
-                x_new = torch.ones(self.input_size - 1, device=self.device) * new_price
+
+                x_new = torch.ones(self.input_size - 1, device=self.device) * new_delta_price
                 x_new = torch.cat((x_new, torch.tensor([own_btc], device=self.device).float()), 0)
 
                 with torch.no_grad():
@@ -406,6 +415,7 @@ class Trainer:
                         wandb.log({
                             "action": action,
                             "current_price": x[0],
+                            "delta_price": delta_price,
                             "loss": loss.item(),
                             "capital": capital,
                             "own_btc": own_btc,
