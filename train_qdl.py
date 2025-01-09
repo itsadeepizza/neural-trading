@@ -23,6 +23,7 @@ epsilon_end = 0.01
 time_interval = 500 # epochs
 gamma = 0.99
 
+
 #----------------------------------------------------------
 
 # calculate epsilon decay
@@ -101,19 +102,29 @@ class Trainer:
         self.policy_net = LSTM_Trader(self.state_size, self.input_size, output_size).to(self.device)
         self.target_net = LSTM_Trader(self.state_size, self.input_size, output_size).to(self.device)
 
+        self.start_with_a_test = False
+
+        # Load weights from file
+        path_to_weights = 'models/policy_net_190.pt'
+        self.policy_net.load_state_dict(torch.load(path_to_weights))
+        self.start_with_a_test = True
+        self.current_step = 0
+
+
+
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
         self.optimizer_policy = torch.optim.Adam(self.policy_net.parameters(), lr=LR)
         self.optimizer_target = torch.optim.Adam(self.target_net.parameters(), lr=LR)
 
         # Load the datasets
-        self.train_dataset = load_dataset('dataset/train')
-        self.test_dataset = load_dataset('dataset/test')
+        self.train_dataset = load_dataset('dataset/test')
+        self.test_dataset = load_dataset('dataset/train')
 
 
         # initialize chunks for test dataset
-        test_size = 1_000
-        num_chunks = 10
+        test_size = 10_000
+        num_chunks = 5
         test_chunks = [random.randint(0, len(self.test_dataset) - test_size) for j in range(num_chunks)]
         self.test_segments = [self.test_dataset.iloc[chunk:chunk + test_size] for chunk in test_chunks]
 
@@ -123,11 +134,14 @@ class Trainer:
 
         self.test_capital_crazy_monkey_B = 1
 
+        self.test_capital_monkey_80percent = 1
+
         self.test_capital_savant_monkey = 1
 
 
     def test(self):
 
+        print('Testing...')
         # Generate starting h and C
         h = torch.ones(self.state_size).to(torch.device(self.device))
         c = torch.ones(self.state_size).to(torch.device(self.device))
@@ -137,16 +151,24 @@ class Trainer:
         
         for test_segment in self.test_segments:
             own_btc = 0
-            for i in range(len(test_segment) - 1):
+            for i in range(len(test_segment) - 2):
 
-                raw_current_price = test_segment['price'].iloc[i]
-                raw_new_price = test_segment['price'].iloc[i + 1]
+                raw_old_price = test_segment['price'].iloc[i]
+                raw_current_price = test_segment['price'].iloc[i + 1]
+                raw_new_price = test_segment['price'].iloc[i + 2]
+                raw_delta_price = raw_current_price - raw_old_price
+                raw_new_delta_price = raw_new_price - raw_current_price
+
+
 
                 # Normalize the price
                 current_price = (raw_current_price - 65481) / 25580
                 new_price = (raw_new_price - 65481) / 25580
 
-                x = torch.tensor([current_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
+                delta_price = raw_delta_price / 1
+                new_delta_price = raw_new_delta_price / 1
+
+                x = torch.tensor([delta_price, own_btc], dtype = torch.float32).to(torch.device(self.device))
 
                 # Forward pass
                 with torch.no_grad():
@@ -164,7 +186,10 @@ class Trainer:
 
                 if torch.rand(1) < 0.5:
                     self.test_capital_crazy_monkey_B = (raw_new_price / raw_current_price) * self.test_capital_crazy_monkey_B
-                    
+
+                if torch.rand(1) < 0.8:
+                    self.test_capital_monkey_80percent = (raw_new_price / raw_current_price) * self.test_capital_monkey_80percent
+
                 savant_monkey_prob += last_delta * 100 * 0.02
                 savant_monkey_prob = min(1, max(0, savant_monkey_prob))
                 if torch.rand(1) < savant_monkey_prob:
@@ -176,9 +201,12 @@ class Trainer:
                                 "test_capital_crazy_monkey_B": self.test_capital_crazy_monkey_B,
                                 "test_capital_crazy_monkey": self.test_capital_crazy_monkey,
                                 "test_capital_always_buy": self.test_capital_always_buy,
+                                "test_capital_monkey_80percent": self.test_capital_monkey_80percent,
                                 "test_capital": self.test_capital,
-                                "test_current_price": x[0]
-                               })
+                                "test_current_price": x[0],
+                               "test_own_btc": own_btc,
+                               }, step=self.current_step)
+                self.current_step += 1
 
 
                 # update own_btc
@@ -303,6 +331,10 @@ class Trainer:
         """
         Train the model
         """
+        if self.start_with_a_test:
+            self.test()
+
+
         global epsilon
         n_epochs = 1000
         train_size = 10_000
@@ -310,12 +342,13 @@ class Trainer:
         print()
 
         capital = 1
+        real_capital = 1
         capital_always_buy = 1
         capital_crazy_monkey = 1
         # Train the model
         for epoch in range(n_epochs):
 
-            # Extract a random segment of the training dataset
+            # Extract a random segment of the training dataset of length train_size
             random_idx = random.randint(0, len(self.train_dataset) - train_size)
             train_segment = self.train_dataset.iloc[random_idx:random_idx + train_size]
 
@@ -377,6 +410,11 @@ class Trainer:
                 else:
                     raise RuntimeError('Impossible action')
 
+                if own_btc == 1:
+                    real_capital = capital
+                else:
+                    real_capital = 0
+
                 # Update dummy capitals
                 capital_always_buy = (raw_new_price / raw_current_price) * capital_always_buy
                 if torch.rand(1) < 0.5:
@@ -405,7 +443,8 @@ class Trainer:
                 # Reset the gradients for h and c
                 h = h.detach()
                 c = c.detach()
-                if i % 300 == 0:
+                self.current_step += 1
+                if i % 1 == 0:
                     print(f'action chosen: {action}')
                     print(f'current price {x[0]} \npolicy output {policy_out} \ntarget net {target_out}\nloss {loss.item()}')
                     print(f'capital {capital}')
@@ -420,16 +459,17 @@ class Trainer:
                             "capital": capital,
                             "own_btc": own_btc,
                             "epoch": epoch,
+                            "real_capital": real_capital,
                             "capital_always_buy": capital_always_buy,
                             "capital_crazy_monkey": capital_crazy_monkey,
                             "state_action_value": state_action_value,
                             "expected_state_action_values": expected_state_action_values,
                             "epsilon": epsilon,
-                            })
+                            }, step=self.current_step)
 
 
                         # log policy output as two plots on the same panel
-                        wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]})
+                        wandb.log({"policy_buy": policy_out[0], "policy_sell": policy_out[1]}, step=self.current_step)
 
                 if i % 5 == 0:
                     self.target_net.load_state_dict(self.policy_net.state_dict())
